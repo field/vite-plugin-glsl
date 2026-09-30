@@ -9,8 +9,8 @@ app.style.padding = '16px';
 
 const importShaders = () =>
   location.hash.slice(1) !== 'slang'
-    ? Promise.all([import('./glsl/main.frag'), import('./wgsl/main.wgsl'), import('./glsl/noise.frag')])
-      .then(([{ default: GLSL }, { default: WGSL }, { default: NOISE }]) => {
+    ? Promise.all([import('./glsl/main.frag'), import('./wgsl/main.wgsl'), import('./glsl/noise.frag'), import('./glsl/shaderlib.frag')])
+      .then(([{ default: GLSL }, { default: WGSL }, { default: NOISE }, { default: SHADERLIB }]) => {
         app.textContent += '----- GLSL: -----\n\n';
         app.textContent += GLSL;
 
@@ -20,9 +20,13 @@ const importShaders = () =>
         app.textContent += '\n\n----- GLSL (node_modules include): -----\n\n';
         app.textContent += NOISE;
 
+        app.textContent += '\n\n----- GLSL (package.json "exports" include): -----\n\n';
+        app.textContent += SHADERLIB;
+
         console.info(`GLSL Shader Length: ${GLSL.length} characters.`);
         console.info(`WGSL Shader Length: ${WGSL.length} characters.`);
         console.info(`GLSL (node_modules) Shader Length: ${NOISE.length} characters.`);
+        console.info(`GLSL (package.json "exports") Shader Length: ${SHADERLIB.length} characters.`);
 
         if (import.meta.hot) {
           import.meta.hot.accept('/test/glsl/main.frag', ({ default: glsl }) => {

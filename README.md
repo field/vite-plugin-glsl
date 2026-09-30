@@ -219,9 +219,51 @@ void main (void) {
 
 Scoped packages (`#include @scope/package/chunk.glsl`) are supported too and `defaultExtension` is appended when the specifier has no extension. Packages are looked up by walking up all `node_modules` directories starting from the importing shader's location, falling back to the `node_modules` directory of the current working one. Files relative to the importing shader always take precedence over packages with the same name.
 
+### Package `exports` maps ###
+
+If the package defines an [`exports`](https://nodejs.org/api/packages.html#exports) field in its `package.json`, the import subpath is mapped through it before falling back to the raw file path inside the package. This allows shader libraries to expose a public layout that differs from their source tree:
+
+```json
+// node_modules/@field/shaderlib/package.json
+{
+  "name": "@field/shaderlib",
+  "exports": {
+    "./noise": {
+      "default": "./src/noise"
+    }
+  }
+}
+```
+
+```glsl
+// Resolved from "node_modules/@field/shaderlib/src/noise/2d.glsl":
+#include @field/shaderlib/noise/2d.glsl
+```
+
+The following `exports` forms are supported (the longest matching key wins):
+
+- **Exact subpaths:** `"./noise/2d.glsl": "./src/noise/2d.glsl"`
+- **Subpath patterns:** `"./noise/*": "./src/noise/*"`
+- **Directory prefixes:** `"./noise": "./src/noise"` (the rest of the subpath is appended to the target)
+
+Targets can be plain strings, arrays (first resolvable entry wins) or condition objects. Conditions are matched in the order they are declared and only `glsl`, `import` and `default` are considered:
+
+```json
+{
+  "exports": {
+    "./noise/*": {
+      "glsl": "./src/noise/*",
+      "default": "./dist/noise/*"
+    }
+  }
+}
+```
+
+Packages without an `exports` field keep resolving against their raw file layout, and so do subpaths that don't match any `exports` key.
+
 ## Change Log ##
 
-- Starting from the next release (unreleased) this plugin supports importing shader chunks from packages installed in `node_modules` (e.g. `#include glsl-noise/simplex/2d.glsl`). Check "Importing from `node_modules`" for more info.
+- Starting from the next release (unreleased) this plugin supports importing shader chunks from packages installed in `node_modules` (e.g. `#include glsl-noise/simplex/2d.glsl`), honoring the package.json `exports` map when present (e.g. `#include @field/shaderlib/noise/2d.glsl`). Check "Importing from `node_modules`" for more info.
 
 - Starting from `v1.6.0` this plugin supports `onComplete` callback function to customize output shaders.
 

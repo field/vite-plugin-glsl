@@ -77,12 +77,157 @@ function isBareSpecifier (path) {
 }
 
 /**
+ * @const
+ * @name exportConditions
+ * @type {readonly string[]}
+ * 
+ * @description Conditions accepted when resolving a package.json
+ * "exports" target object, the first matching key in the target wins
+ */
+const exportConditions = ['glsl', 'import', 'default'];
+
+/**
+ * @function
+ * @name parsePackageSpecifier
+ * @description Splits a bare specifier into the package name
+ * (including its scope) and the "./"-prefixed subpath within it
+ * 
+ * @param {string} specifier Bare package specifier of the chunk
+ * 
+ * @returns {{ name: string, subpath: string }} Package name and subpath
+ */
+function parsePackageSpecifier (specifier) {
+  const segments = specifier.split('/');
+  const length = specifier.startsWith('@') ? 2 : 1;
+
+  const name = segments.slice(0, length).join('/');
+  const rest = segments.slice(length).join('/');
+
+  return { name, subpath: rest ? `./${rest}` : '.' };
+}
+
+/**
+ * @function
+ * @name resolveExportTarget
+ * @description Resolves an "exports" target value to a single relative
+ * path. Strings are returned as is, arrays yield their first resolvable
+ * entry and condition objects are matched against "exportConditions"
+ * 
+ * @param {string | string[] | Record<string, unknown> | null} target Exports target
+ * 
+ * @returns {string | undefined} Relative target path if resolvable
+ */
+function resolveExportTarget (target) {
+  if (typeof target === 'string') return target;
+  if (!target) return;
+
+  if (Array.isArray(target)) {
+    for (const entry of target) {
+      const resolved = resolveExportTarget(entry);
+      if (resolved) return resolved;
+    }
+
+    return;
+  }
+
+  for (const condition of Object.keys(target)) {
+    if (exportConditions.includes(condition)) {
+      const resolved = resolveExportTarget(target[condition]);
+      if (resolved) return resolved;
+    }
+  }
+}
+
+/**
+ * @function
+ * @name resolvePackageExports
+ * @description Maps a package subpath through the package.json "exports"
+ * field of a package. Supports exact keys ("./noise/2d.glsl"), subpath
+ * patterns ("./noise/*") and directory prefixes ("./noise" -> "./src/noise",
+ * the remainder of the subpath is appended to the target)
+ * 
+ * @param {string} packageDirectory Absolute path of the package directory
+ * @param {string} subpath          "./"-prefixed subpath within the package
+ * 
+ * @returns {string | undefined} Absolute path of the chunk if mapped
+ */
+function resolvePackageExports (packageDirectory, subpath) {
+  const manifest = resolve(packageDirectory, 'package.json');
+  if (!existsSync(manifest)) return;
+
+  let exports;
+
+  try {
+    exports = JSON.parse(readFileSync(manifest, 'utf8')).exports;
+  }
+  catch {
+    return;
+  }
+
+  if (exports === undefined || exports === null) return;
+
+  const isMap = typeof exports === 'object' && !Array.isArray(exports) &&
+    Object.keys(exports).every(key => key.startsWith('.'));
+
+  if (!isMap) exports = { '.': exports };
+
+  let match;
+
+  for (const key of Object.keys(exports)) {
+    let target, remainder = '';
+
+    if (key === subpath) target = key;
+
+    else if (key.includes('*')) {
+      const [prefix, suffix] = key.split('*');
+
+      if (
+        subpath.startsWith(prefix) &&
+        subpath.endsWith(suffix) &&
+        subpath.length >= prefix.length + suffix.length
+      ) {
+        target = key;
+        remainder = subpath.slice(prefix.length, subpath.length - suffix.length);
+      }
+    }
+
+    else {
+      const prefix = key.endsWith('/') ? key : `${key}/`;
+
+      if (subpath.startsWith(prefix)) {
+        target = key;
+        remainder = subpath.slice(prefix.length);
+      }
+    }
+
+    if (target && (!match || target.length > match.key.length)) {
+      match = { key: target, remainder };
+    }
+  }
+
+  if (!match) return;
+
+  const target = resolveExportTarget(exports[match.key]);
+  if (!target) return;
+
+  const mapped = match.key.includes('*')
+    ? target.replace(/\*/g, match.remainder)
+    : match.key === subpath ? target
+    : posix.join(target, match.remainder);
+
+  const path = resolve(packageDirectory, mapped);
+  if (existsSync(path)) return path;
+}
+
+/**
  * @function
  * @name resolveNodeModule
  * @description Resolves a bare specifier (e.g. "glsl-noise/simplex/2d.glsl"
  * or "@scope/pkg/chunk.glsl") to an absolute path by walking up all
  * "node_modules" directories starting from the importing shader's directory
- * and falling back to the "node_modules" directory of the current working one
+ * and falling back to the "node_modules" directory of the current working one.
+ * Within a package, the package.json "exports" map is honored first and
+ * the raw file path inside the package is used as a fallback
  * 
  * @param {string} specifier Bare package specifier of the chunk
  * @param {string} directory Directory of the shader importing the chunk
@@ -92,6 +237,7 @@ function isBareSpecifier (path) {
  */
 function resolveNodeModule (specifier, directory, ext) {
   const chunk = extname(specifier) ? specifier : `${specifier}.${ext}`;
+  const { name, subpath } = parsePackageSpecifier(chunk);
   const directories = [];
 
   for (let current = resolve(directory); ; current = dirname(current)) {
@@ -102,6 +248,12 @@ function resolveNodeModule (specifier, directory, ext) {
   directories.push(cwd());
 
   for (const current of directories) {
+    const packageDirectory = resolve(current, 'node_modules', name);
+    if (!existsSync(packageDirectory)) continue;
+
+    const exported = resolvePackageExports(packageDirectory, subpath);
+    if (exported) return exported;
+
     const path = resolve(current, 'node_modules', chunk);
     if (existsSync(path)) return path;
   }
@@ -381,7 +533,8 @@ function loadChunks (source, path, pattern, options) {
 
         if (!module) throw new Error(
           `Unable to resolve "${specifier}" imported in "${unixPath}": ` +
-          'no such file relative to the shader nor in any "node_modules" directory.'
+          'no such file relative to the shader nor in any "node_modules" directory ' +
+          '(neither through the package.json "exports" map nor as a raw package path).'
         );
 
         shader = module;

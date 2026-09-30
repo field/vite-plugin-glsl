@@ -77,7 +77,6 @@
     }
   },
   "devDependencies": {
-    "glsl-noise": "^0.0.0",
     "vite": "latest"
   },
   "engines": {
