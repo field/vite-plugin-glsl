@@ -192,7 +192,36 @@ void main (void) {
 }
 ```
 
+## Importing from `node_modules` ##
+
+Shader chunks can also be imported from third-party packages installed in `node_modules`. Any import path that is neither relative (`./`, `../`) nor absolute from the project `root` (`/`) is treated as a package specifier once no matching file is found relative to the importing shader:
+
+```bash
+npm install glsl-noise
+```
+
+```glsl
+// main.frag
+#version 300 es
+
+precision highp float;
+
+in vec2 vUv;
+out vec4 fragColor;
+
+// Resolved from "node_modules/glsl-noise/simplex/2d.glsl":
+#include glsl-noise/simplex/2d.glsl
+
+void main (void) {
+  fragColor = vec4(vec3(snoise(vUv) * 0.5 + 0.5), 1.0);
+}
+```
+
+Scoped packages (`#include @scope/package/chunk.glsl`) are supported too and `defaultExtension` is appended when the specifier has no extension. Packages are looked up by walking up all `node_modules` directories starting from the importing shader's location, falling back to the `node_modules` directory of the current working one. Files relative to the importing shader always take precedence over packages with the same name.
+
 ## Change Log ##
+
+- Starting from the next release (unreleased) this plugin supports importing shader chunks from packages installed in `node_modules` (e.g. `#include glsl-noise/simplex/2d.glsl`). Check "Importing from `node_modules`" for more info.
 
 - Starting from `v1.6.0` this plugin supports `onComplete` callback function to customize output shaders.
 

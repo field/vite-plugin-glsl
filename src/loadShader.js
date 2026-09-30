@@ -1,6 +1,6 @@
 import { dirname, resolve, extname, posix, sep } from 'path';
 import { emitWarning, cwd } from 'process';
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import { platform } from 'os';
 
 /**
@@ -60,6 +60,51 @@ function resetSavedChunks () {
   recursiveChunk = '';
   allChunks.clear();
   return chunk;
+}
+
+/**
+ * @function
+ * @name isBareSpecifier
+ * @description Checks if a chunk path is a bare (package) specifier,
+ * i.e. it's neither a relative ("./", "../") nor a root ("/") import
+ * 
+ * @param {string} path Chunk path as written in the import statement
+ * 
+ * @returns {boolean} Whether the chunk path is a bare specifier
+ */
+function isBareSpecifier (path) {
+  return !/^(?:\.{1,2}\/|\/|[a-z]:[\\/])/i.test(path);
+}
+
+/**
+ * @function
+ * @name resolveNodeModule
+ * @description Resolves a bare specifier (e.g. "glsl-noise/simplex/2d.glsl"
+ * or "@scope/pkg/chunk.glsl") to an absolute path by walking up all
+ * "node_modules" directories starting from the importing shader's directory
+ * and falling back to the "node_modules" directory of the current working one
+ * 
+ * @param {string} specifier Bare package specifier of the chunk
+ * @param {string} directory Directory of the shader importing the chunk
+ * @param {string} ext       Extension to append if the specifier has none
+ * 
+ * @returns {string | undefined} Absolute path of the chunk if found
+ */
+function resolveNodeModule (specifier, directory, ext) {
+  const chunk = extname(specifier) ? specifier : `${specifier}.${ext}`;
+  const directories = [];
+
+  for (let current = resolve(directory); ; current = dirname(current)) {
+    directories.push(current);
+    if (dirname(current) === current) break;
+  }
+
+  directories.push(cwd());
+
+  for (const current of directories) {
+    const path = resolve(current, 'node_modules', chunk);
+    if (existsSync(path)) return path;
+  }
 }
 
 /**
@@ -313,6 +358,7 @@ function loadChunks (source, path, pattern, options) {
 
     source = source.replace(pattern, (_, ...[, chunkPath]) => {
       chunkPath = chunkPath.trim().replace(/^(?:"|')?|(?:"|')?;?$/gi, '');
+      const specifier = chunkPath;
 
       if (!chunkPath.indexOf('/')) {
         const base = cwd().split(sep).join(posix.sep);
@@ -329,6 +375,17 @@ function loadChunks (source, path, pattern, options) {
 
       let shader = resolve(directory, chunkPath);
       if (!extname(shader)) shader = `${shader}.${ext}`;
+
+      if (!existsSync(shader) && isBareSpecifier(specifier)) {
+        const module = resolveNodeModule(specifier, currentDirectory, ext);
+
+        if (!module) throw new Error(
+          `Unable to resolve "${specifier}" imported in "${unixPath}": ` +
+          'no such file relative to the shader nor in any "node_modules" directory.'
+        );
+
+        shader = module;
+      }
 
       const shaderPath = shader.split(sep).join(posix.sep);
       dependentChunks.get(unixPath)?.push(shaderPath);
