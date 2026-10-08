@@ -1,5 +1,5 @@
 {
-  "name": "vite-plugin-glsl",
+  "name": "@field/vite-plugin-glsl",
   "description": "Import, inline (and minify) GLSL/WGSL/Slang shader files",
   "homepage": "https://github.com/UstymUkhman/vite-plugin-glsl#readme",
   "packageManager": "^npm@10.8.3",
@@ -24,9 +24,7 @@
     "email": "ustym.ukhman@gmail.com"
   },
   "publishConfig": {
-    "save-dev": true,
-    "access": "public",
-    "registry": "https://registry.npmjs.org/"
+    "registry": "https://npm.pkg.github.com"
   },
   "exports": {
     ".": "./src/index.js",
